@@ -3,7 +3,7 @@ from Bio import SeqIO
 from Bio.PDB import PDBParser
 import esm
 import torch
-from torch_geometric.data import Data, Batch
+from torch_geometric.data import Data
 import csv
 import wget
 import os
@@ -13,7 +13,7 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore")
 
-
+#obtained protein list from files
 def read_file(filename):
     train_list=[]
     with open (filename) as f:
@@ -22,15 +22,7 @@ def read_file(filename):
             train_list.append(train)
     return train_list
 
-def get_seq(filename,name):
-    with open(filename) as f:
-        for line in f:
-            line = line.split("\n")[0]
-            idx = line.split("\t")[0]
-            seq = line.split("\t")[-1]
-            if idx==name:
-                return seq
-
+#select residuals that distances less than 8.5
 def get_edge(path,name):
     pdb_name=name.split("-")[0].lower()+".pdb"
     pdb_path = os.path.join(path, pdb_name)
@@ -38,27 +30,18 @@ def get_edge(path,name):
     return edge_index
 
 
-def load_FASTA(filename):  #打印蛋白质名称，序列
-    # Loads fasta file and returns a list of the Bio SeqIO records
-    infile = open(filename, 'rU')
-    id_index = []
-    proteins = []
-    for entry in SeqIO.parse(infile, 'fasta'):
-        proteins.append(str(entry.seq))
-        id_index.append(str(entry.id))
-    return id_index,proteins
 
-def get_PDB_structure(idx_list):  # download pdb and add it in files
+def get_PDB_structure(idx_list):  # download pdb files from website and obtain the 3D coordinate about target protein
     no_pdb = []
     for name in idx_list:
         name = name.split("-")[0]
         name = name.lower()
         url = "https://files.rcsb.org/download/%s.pdb" % (name)
-        path = "pdb_files"
+        path = "pdb_files_train"
 
         try:
             wget.download(url, path)
-            p = './pdb_files/%s.pdb' % (name)
+            p = './pdb_files_train/%s.pdb' % (name)
             with open(p, 'r') as r:
                 lines = r.readlines()
                 with open(p, 'w') as w:
@@ -77,7 +60,7 @@ def get_PDB_structure(idx_list):  # download pdb and add it in files
 
     return no_pdb
 
-def load_predicted_PDB(pdbfile):##生成contact maps的距离矩阵 # Generate (diagonalized) C_alpha distance matrix from a pdbfile
+def load_predicted_PDB(pdbfile):
     parser = PDBParser()
     structure = parser.get_structure(pdbfile.split('/')[-1].split('.')[0], pdbfile)
     residues = [r for r in structure.get_residues()]
@@ -152,6 +135,7 @@ def edge(filename, camp_threshold):
     edge = [row, col]
     return edge
 
+#esm2 as features extractor
 def get_embedding(Sequence):
     esm_model, alphabet = esm.pretrained.esm2_t36_3B_UR50D()
     batch_converter = alphabet.get_batch_converter()
@@ -163,7 +147,7 @@ def get_embedding(Sequence):
         esm_embed = token_representations[1:len(Sequence) + 1]
     return esm_embed
 
-def load_GO_annot(filename):  ##加载注释文件
+def load_GO_annot(filename):
     # Load GO annotations
     onts = ['mf', 'bp', 'cc']
     prot2annot = {}
@@ -202,37 +186,15 @@ def load_GO_annot(filename):  ##加载注释文件
                 counts[onts[i]][goterm_indices] += 1.0
     return prot2annot, goterms, gonames, counts
 
-def load_EC_annot(filename):
-    # Load EC annotations """
-    prot2annot = {}
-    with open(filename, mode='r') as tsvfile:
-        reader = csv.reader(tsvfile, delimiter='\t')
-
-        # molecular function
-        next(reader, None)  # skip the headers
-        ec_numbers = {'ec': next(reader)}
-        next(reader, None)  # skip the headers
-        counts = {'ec': np.zeros(len(ec_numbers['ec']), dtype=float)}
-        for row in reader:
-            prot, prot_ec_numbers = row[0], row[1]
-            ec_indices = [ec_numbers['ec'].index(ec_num) for ec_num in prot_ec_numbers.split(',')]
-            prot2annot[prot] = {'ec': np.zeros(len(ec_numbers['ec']), dtype=np.int64)}
-            prot2annot[prot]['ec'][ec_indices] = 1.0
-            counts['ec'][ec_indices] += 1
-    return prot2annot, ec_numbers, ec_numbers, counts
-
-def protein_graph(esm_embed, edge_index):  #加载GCN的输入文件，用在predictor.py
 
 
-    # add edge to pairs whose distances are more possible under 8.25
-    #row, col = edge_index
+def protein_graph(esm_embed, edge_index): #create graphs
+
+
     edge_index = torch.LongTensor(edge_index)
-    # if AF_embed == None:
-    #     data = Data(x=seq_code, edge_index=edge_index)
-    # else:
+
     x=torch.tensor(esm_embed,dtype=torch.float)
     # y=torch.tensor(y,dtype=torch.float)
-    # y=torch.reshape(y,(1,320))
 
     data = Data(x=x, edge_index=edge_index)
     return data
